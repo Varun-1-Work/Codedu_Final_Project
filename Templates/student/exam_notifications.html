@@ -1,0 +1,53 @@
+{% extends "student/base.html" %}
+{% block content %}
+
+<div class="container mt-4">
+    <h3 class="mb-4">📢 Exam Notifications</h3>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Exam Name</th>
+                        <th>Course</th>
+                        <th>Batch</th>
+                        <th>Exam Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if exams %}
+                        {% for exam in exams %}
+                        <tr>
+                            <td>{{ forloop.counter }}</td>
+                            <td>{{ exam.exam_name }}</td>
+                            <td>{{ exam.course }}</td>
+                            <td>{{ exam.batch }}</td>
+                            <td>{{ exam.exam_date }}</td>
+                            <td>
+                                <span class="badge bg-warning text-dark">
+                                    {{ exam.status }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center">
+                                No Scheduled or Pending Exams
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+
+
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+    

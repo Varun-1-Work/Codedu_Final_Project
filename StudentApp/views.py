@@ -1,0 +1,536 @@
+from django.shortcuts import get_object_or_404, render, redirect
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.models import User
+from django.contrib import messages
+from django.utils import timezone
+import string
+import random
+from decimal import Decimal
+from django.db.models import Q, Sum
+
+from BdmApp.models import FeeInstallment
+from django.utils.timezone import localdate
+from .models import (
+    BatchProgress, BookIssue, ClassSchedule,  LeaveApplication, PendingAdmission, PlacementDrive, Student, Attendance, 
+    Course, FeePayment, Document, StudentFeedback, ExamResult, StudyMaterial, Syllabus, 
+    Trainer, Batch, ConductedExam
+)
+from .forms import LeaveForm
+
+# ==========================================
+# AUTHENTICATION VIEWS
+# ==========================================
+
+def student_login(request):
+    if request.method == 'POST':
+        username_input = request.POST['username']
+        password_input = request.POST['password']
+
+        user = authenticate(request, username=username_input, password=password_input)
+
+        if user is not None:
+            login(request, user)
+            return redirect('dashboard') 
+        else:
+            messages.error(request, "Invalid Student ID or Password")
+    
+    return render(request, 'index.html')
+
+def user_logout(request):
+    logout(request)
+    return redirect('login')
+
+# ==========================================
+# DASHBOARD & PROFILE
+# ==========================================
+
+@login_required(login_url='login')
+def dashboard(request):
+    user = request.user
+
+    # --- SCENARIO 1: SUPER ADMIN ---
+    if user.is_superuser or user.is_staff:
+        # FIX: Don't render here. Redirect to the specialized view that has all the data.
+        return redirect('bdm_dashboard')
+
+    # --- SCENARIO 2: TRAINER ---
+    elif hasattr(user, 'trainer'):
+        return redirect('trainer_dashboard') 
+
+    # --- SCENARIO 3: STUDENT ---
+    else:
+        try:
+            student = Student.objects.get(user=user)
+            
+            # 1. Calculate Attendance (Existing code)
+            records = Attendance.objects.filter(student=student)
+            total = records.count()
+            present = records.filter(status='Present').count()
+            pct = round((present/total)*100, 1) if total > 0 else 0
+            
+            # 2. Calculate Fee Balance (NEW CODE)
+            # Sum up all payments made by this student
+            total_paid = FeePayment.objects.filter(student=student).aggregate(Sum('amount'))['amount__sum']
+            
+            # If no payments exist, the result is None, so set it to 0
+            if total_paid is None:
+                total_paid = 0
+                
+            balance = student.course.price - total_paid
+
+            return render(request, 'student/dashboard_student.html', {
+                'student': student,
+                'percentage': pct,
+                'balance': balance  # <--- Crucial: Pass this to the template
+            })
+
+        except Student.DoesNotExist:
+            messages.error(request, "Access Denied: Profile not found.")
+            return redirect('user_logout')
+
+@login_required(login_url='login')
+def student_profile(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        messages.error(request, "Profile not found.")
+        return redirect('dashboard')
+
+    if request.method == 'POST':
+        # 1. Update User Model Fields
+        user = request.user
+        user.first_name = request.POST.get('first_name')
+        user.last_name = request.POST.get('last_name')
+        user.save()
+
+        # 2. Update Student Model Fields
+        student.phone = request.POST.get('phone')
+        student.address = request.POST.get('address')
+        
+        # Handle Date Safely (Prevents TypeError)
+        dob = request.POST.get('date_of_birth')
+        if dob: 
+            student.date_of_birth = dob
+            
+        # Handle Checkbox
+        student.placement_willingness = request.POST.get('placement_willingness') == 'on'
+
+        # 3. Handle Image Upload
+        if 'profile_image' in request.FILES:
+            student.profile_image = request.FILES['profile_image']
+
+        student.save()
+        messages.success(request, "Profile updated successfully!")
+        return redirect('student_profile')
+
+    return render(request, 'student/profile.html', {'student': student})
+
+
+# StudentApp/views.py
+
+@login_required
+# StudentApp/views.py
+
+@login_required
+def my_classroom(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    # 1. Fetch Materials
+    materials = StudyMaterial.objects.filter(
+        Q(batch=student.batch) | 
+        Q(course=student.course, batch__isnull=True)
+    ).order_by('-created_at')
+
+    # 2. Fetch Schedule (Upcoming classes)
+    schedule = ClassSchedule.objects.filter(
+        batch=student.batch,
+        start_time__gte=timezone.now()
+    ).order_by('start_time')
+
+    # 3. Fetch Syllabus & Progress (NEW)
+    syllabus = Syllabus.objects.filter(course=student.course).order_by('order')
+    
+    # Get IDs of topics completed by this batch
+    completed_ids = BatchProgress.objects.filter(
+        batch=student.batch
+    ).values_list('syllabus_topic_id', flat=True)
+
+    # Calculate Percentage
+    total_topics = syllabus.count()
+    completed_count = len(completed_ids)
+    progress_percent = int((completed_count / total_topics) * 100) if total_topics > 0 else 0
+
+    return render(request, 'student/classroom.html', {
+        'student': student,
+        'materials': materials,
+        'schedule': schedule,
+        'syllabus': syllabus,           # <--- New
+        'completed_ids': completed_ids, # <--- New
+        'progress_percent': progress_percent # <--- New
+    })
+@login_required
+def exam_portal(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    results = ExamResult.objects.filter(student=student)
+    
+    # Download Certificate Logic
+    has_results = results.exists()
+    all_passed = not results.filter(is_passed=False).exists()
+    
+    can_download_cert = (
+        has_results and 
+        all_passed and 
+        student.is_fee_paid and 
+        student.documents_verified
+    )
+
+    return render(request, 'student/exams.html', {
+        'student': student,
+        'results': results,
+        'can_download_cert': can_download_cert
+    })
+
+@login_required
+def download_certificate(request):
+    # This is a placeholder. In real app, generate PDF here.
+    messages.success(request, "Certificate download started...")
+    return redirect('exam_portal')
+
+# ==========================================
+# ATTENDANCE & LEAVE (Student)
+# ==========================================
+
+@login_required(login_url='login')
+def apply_leave(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return render(request, 'error.html', {'message': 'You are not a registered student.'})
+
+    leaves = LeaveApplication.objects.filter(student=student).order_by('-applied_on')
+
+    if request.method == 'POST':
+        form = LeaveForm(request.POST)
+        if form.is_valid():
+            leave_request = form.save(commit=False)
+            leave_request.student = student
+            leave_request.save()
+            messages.success(request, "Leave application submitted.")
+            return redirect('apply_leave') # Redirect to same page to show history
+    else:
+        form = LeaveForm()
+
+    return render(request, 'student/apply_leave.html', {'form': form, 'leaves': leaves})
+
+@login_required
+def student_my_attendance(request):
+    try:
+        student = request.user.student 
+    except Student.DoesNotExist:
+        return render(request, 'attendance/error.html', {'message': "No student profile found."})
+
+    records = Attendance.objects.filter(student=student).order_by('-date')
+    total_days = records.count()
+    present_days = records.filter(status='Present').count()
+    
+    attendance_percentage = (present_days / total_days * 100) if total_days > 0 else 0
+
+    return render(request, 'student/student_view.html', {
+        'records': records,
+        'present_days': present_days,
+        'total_days': total_days,
+        'percentage': round(attendance_percentage, 1)
+    })
+
+# ==========================================
+# FEES & DOCUMENTS (Student)
+# ==========================================
+
+@login_required
+def pay_fee(request):
+    try:
+        student = request.user.student
+    except AttributeError:
+        # Redirect if user is not a student (e.g., admin)
+        return redirect('dashboard')
+
+    # 1. Calculate Balance
+    course_price = student.course.price
+    # Sum of all previous payments
+    total_paid = FeePayment.objects.filter(student=student).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+    balance_remaining = course_price - total_paid
+
+    # 2. Get EMI Details
+    # Get the oldest unpaid EMI to show as "Next Installment"
+    next_emi = FeeInstallment.objects.filter(student=student, is_paid=False).order_by('due_date').first()
+    pending_count = FeeInstallment.objects.filter(student=student, is_paid=False).count()
+
+    # --- LOGIC FIX: Ensure EMI amount never exceeds actual Balance ---
+    # This fixes the issue where EMI shows ₹18,000 but Balance is only ₹16,000
+    if next_emi:
+        if next_emi.amount > balance_remaining:
+            next_emi.amount = balance_remaining
+
+    # 3. Handle Payment Submission
+    if request.method == 'POST':
+        try:
+            payment_type = request.POST.get('payment_option')
+            mode = request.POST.get('payment_mode') 
+
+            # Determine Amount based on user choice
+            if payment_type == 'next_emi' and next_emi:
+                amount = next_emi.amount
+            elif payment_type == 'full_balance':
+                amount = balance_remaining
+            else:
+                # Custom amount input
+                amount = Decimal(request.POST.get('custom_amount'))
+
+            # Validation
+            if amount <= 0:
+                 messages.error(request, "Invalid amount.")
+            elif amount > balance_remaining:
+                 messages.error(request, f"Cannot pay more than balance (₹{balance_remaining}).")
+            else:
+                # --- A. Record the Payment ---
+                FeePayment.objects.create(student=student, amount=amount, mode=mode)
+
+                # --- B. Update EMI Status (Partial Payment Logic) ---
+                # We loop through unpaid EMIs and "fill them up" with the paid amount
+                pending_emis = FeeInstallment.objects.filter(student=student, is_paid=False).order_by('due_date')
+                
+                money_to_allocate = amount
+                
+                for emi in pending_emis:
+                    if money_to_allocate <= 0:
+                        break
+                    
+                    if money_to_allocate >= emi.amount:
+                        # Payment covers this full EMI
+                        money_to_allocate -= emi.amount
+                        emi.is_paid = True
+                        emi.save()
+                    else:
+                        # Payment is partial (e.g., Pay 2k for 18k EMI)
+                        # Reduce the EMI amount so next time it shows less
+                        emi.amount = emi.amount - money_to_allocate
+                        emi.save()
+                        money_to_allocate = 0 # All money used
+
+                # --- C. Check Full Course Completion ---
+                new_total_paid = total_paid + amount
+                # Use a small buffer (1.00) for decimal comparison safety
+                if new_total_paid >= (course_price - Decimal('1.00')):
+                    student.is_fee_paid = True
+                    student.save()
+                    # Mark all remaining installments as paid/cleared
+                    FeeInstallment.objects.filter(student=student).update(is_paid=True)
+
+                messages.success(request, f"Payment of ₹{amount} successful!")
+                return redirect('dashboard')
+
+        except (ValueError, TypeError):
+            messages.error(request, "Invalid amount entered.")
+
+    # Render Template
+    return render(request, 'student/pay_fee.html', {
+        'student': student,
+        'balance_remaining': balance_remaining,
+        'next_emi': next_emi,
+        'pending_count': pending_count
+    })
+
+@login_required
+def view_id_card(request):
+    try:
+        student = request.user.student
+    except AttributeError:
+        return redirect('dashboard')
+
+    # --- TEMPORARILY DISABLED SECURITY CHECK ---
+    # Uncomment these lines later when you want to enforce strict rules
+    # if not student.is_fee_paid or not student.documents_verified:
+    #     messages.error(request, "ID Card locked! Please complete payment and document verification.")
+    #     return redirect('dashboard')
+
+    # Check if photo exists to avoid errors
+    photo_url = None
+    if student.profile_image:
+        photo_url = student.profile_image.url
+    
+    # You might want to pass a default image if none exists
+    # else:
+    #     photo_url = '/static/images/default_avatar.png'
+
+    return render(request, 'student/id_card.html', {
+        'student': student,
+        'photo_url': photo_url
+    })
+@login_required
+def submit_feedback(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    if request.method == 'POST':
+        rating = request.POST.get('rating')
+        feedback_type = request.POST.get('feedback_type')
+        comments = request.POST.get('comments')
+
+        if not rating:
+            messages.error(request, "Please select a star rating.")
+        else:
+            StudentFeedback.objects.create(
+                student=student,
+                rating=rating,
+                feedback_type=feedback_type,
+                comments=comments
+            )
+            messages.success(request, "Thank you! Your feedback has been submitted.")
+            return redirect('submit_feedback')
+
+    my_feedback = StudentFeedback.objects.filter(student=student).order_by('-date_submitted')
+
+    return render(request, 'student/feedback.html', {
+        'student': student, 
+        'my_feedback': my_feedback
+    })
+
+# ==========================================
+# PUBLIC / ENROLLMENT VIEWS
+# ==========================================
+
+def course_listt(request):
+    courses = Course.objects.all() 
+    return render(request, 'course.html', {'courses': courses})
+
+
+
+# StudentApp/views.py
+
+# --- VIEW: MY LIBRARY (Books Issued) ---
+@login_required
+def my_library(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    books = BookIssue.objects.filter(student=student).order_by('-issued_on')
+    
+    return render(request, 'student/library.html', {'student': student, 'books': books})
+
+# --- VIEW: PLACEMENT PORTAL ---
+@login_required
+def placement_portal(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    # 1. Check if student is eligible (Willingness must be ON)
+    if not student.placement_willingness:
+        messages.warning(request, "You have opted OUT of placements. Please update your profile to view drives.")
+        return redirect('student_profile')
+
+    # 2. Show active drives happening in the future
+    upcoming_drives = PlacementDrive.objects.filter(
+        is_active=True, 
+        date_of_drive__gte=timezone.now()
+    ).order_by('date_of_drive')
+
+    return render(request, 'student/placements.html', {
+        'student': student,
+        'drives': upcoming_drives
+    })
+
+# StudentApp/views.py
+
+@login_required
+def my_schedule(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    if not student.batch:
+        messages.warning(request, "You are not assigned to a batch yet.")
+        return redirect('dashboard')
+
+    # Get today's date to filter out old classes
+    now = timezone.now()
+
+    # Fetch upcoming classes for this student's batch, sorted by nearest time
+    upcoming_classes = ClassSchedule.objects.filter(
+        batch=student.batch,
+        start_time__gte=now
+    ).order_by('start_time')
+
+    return render(request, 'student/schedule.html', {
+        'student': student,
+        'schedule': upcoming_classes
+    })
+
+# StudentApp/views.py
+
+@login_required
+def lesson_plan(request):
+    try:
+        student = request.user.student
+    except Student.DoesNotExist:
+        return redirect('dashboard')
+
+    if not student.batch:
+        messages.warning(request, "You are not assigned to a batch yet.")
+        return redirect('dashboard')
+
+    # 1. Get the full syllabus for the Student's Course
+    syllabus = Syllabus.objects.filter(course=student.course)
+
+    # 2. Get the list of IDs of topics that are completed for this Batch
+    completed_ids = BatchProgress.objects.filter(
+        batch=student.batch
+    ).values_list('syllabus_topic_id', flat=True)
+
+    # 3. Calculate Progress Percentage
+    total_topics = syllabus.count()
+    completed_count = len(completed_ids)
+    progress_percent = int((completed_count / total_topics) * 100) if total_topics > 0 else 0
+
+    return render(request, 'student/lesson_plan.html', {
+        'student': student,
+        'syllabus': syllabus,
+        'completed_ids': completed_ids,
+        'progress_percent': progress_percent
+    })
+
+###################################################################
+
+@login_required
+def student_exams(request):
+    try:
+        student = request.user.student
+    except:
+        messages.error(request, "Access Denied")
+        return redirect('login')
+
+    # Show only exams for student's course/batch
+    exams = ConductedExam.objects.filter(course=student.course, batch=student.batch)
+
+    return render(request, 'student/view_exams.html', {
+        'exams': exams
+    })
+
+
+
+

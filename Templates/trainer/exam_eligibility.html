@@ -1,0 +1,142 @@
+{% extends 'trainer/base.html' %}
+
+{% block title %}Prerequisite Check | StudyLab{% endblock %}
+
+{% block content %}
+<div class="card p-4 shadow-sm rounded-3">
+    <h2 class="text-center mb-4">Prerequisite Status</h2>
+    <form method="get" class="row g-3 mb-4 align-items-end">
+
+        <!-- BATCH FILTER -->
+        <div class="col-md-4">
+            <label class="form-label fw-semibold"></label>
+            <select name="batch" class="form-select">
+                <option value="">All Batches</option>
+                {% for batch in batches %}
+                    <option value="{{ batch.id }}"
+                        {% if selected_batch == batch.id|stringformat:"s" %}selected{% endif %}>
+                        {{ batch.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- COURSE FILTER -->
+        <div class="col-md-4">
+            <label class="form-label fw-semibold"></label>
+            <select name="course" class="form-select">
+                <option value="">All Courses</option>
+                {% for course in courses %}
+                    <option value="{{ course.id }}"
+                        {% if selected_course == course.id|stringformat:"s" %}selected{% endif %}>
+                        {{ course.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- BUTTONS -->
+        <div class="col-md-4 d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+                Apply Filters
+            </button>
+            <a href="{% url 'trainer_exam_eligibility' %}"
+            class="btn btn-outline-secondary">
+                Reset
+            </a>
+        </div>
+
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>STUDENT</th>
+                    <th>BATCH</th>
+                    <th>COURSE</th>
+                    <th>FEES</th>
+                    <th>ATTENDANCE %</th>
+                    <th>ACADEMICS</th>
+                    <th>STATUS</th>
+                    <th class="col-cert">CERTIFICATION</th>
+
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in eligibility_data %}
+                <tr>
+                    <td class="fw-semibold ">
+                        {% if item.student.user.get_full_name %}
+                            {{ item.student.user.get_full_name|upper }}
+                        {% elif item.student.user.first_name %}
+                            {{ item.student.user.first_name|upper }}
+                        {% else %}
+                            {{ item.student.user.username|upper }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ item.student.batch.name }}
+                    </td>
+
+                    <!-- COURSE -->
+                    <td>
+                        {{ item.student.batch.course.name }}
+                    </td>
+
+                    <td>
+                        <span class="{% if item.student.is_fee_paid %}text-success fw-bold{% else %}text-danger fw-bold{% endif %}">
+                            {% if item.student.is_fee_paid %}Paid{% else %}Not Paid{% endif %}
+                        </span>
+                    </td>
+
+                    <td>
+                        <span class="{% if item.result.attendance < 75 %}text-danger fw-bold
+                                     {% elif item.result.attendance < 85 %}text-warning fw-bold
+                                     {% else %}text-success fw-bold{% endif %}">
+                            {{ item.result.attendance }}%
+                        </span>
+                    </td>
+
+                    <td>
+                        <span class="{% if item.result.academics %}text-success fw-bold{% else %}text-danger fw-bold{% endif %}">
+                            {% if item.result.academics %}Pass{% else %}Fail{% endif %}
+                        </span>
+                    </td>
+
+                    <td>
+                        <span class="badge {% if item.result.eligible %}bg-success{% else %}bg-danger{% endif %}">
+                            {% if item.result.eligible %}Eligible{% else %}Not Eligible{% endif %}
+                        </span>
+                        {% if not item.result.eligible %}
+                        <ul class="mb-0 mt-1 text-danger small">
+                            {% for reason in item.result.reasons %}
+                                <li>{{ reason }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </td>
+                    <td class="col-cert">
+                        {% if item.result.eligible %}
+                            <a href="" 
+                            class="btn btn-sm btn-success">
+                            Issue Certificate
+                            </a>
+                        {% else %}
+                            <span class="text-muted small">Not Eligible</span>
+                        {% endif %}
+
+                        {% comment %} Optional: Show if already issued {% endcomment %}
+                        {% if item.student.certification_set.exists %}
+                            <span class="badge bg-primary mt-1">Issued</span>
+                        {% endif %}
+                    </td>
+
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

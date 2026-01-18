@@ -1,0 +1,90 @@
+{% extends 'trainer/base.html' %}
+
+{% block title %}Edit Exam | StudyLab{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold mb-0">Edit Exam</h2>
+
+        <a href="{% url 'conduct_exam' %}"
+           class="btn btn-outline-secondary rounded-pill">
+            <i class="fas fa-arrow-left me-1"></i> Back
+        </a>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-6">
+
+            <div class="card shadow border-0 rounded-4">
+
+                <div class="card-header bg-warning text-dark py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-edit me-2"></i>Edit Exam
+                    </h5>
+                </div>
+
+                <div class="card-body p-4">
+                    <form method="post" id="examForm">
+                        {% csrf_token %}
+
+                        {% for field in form %}
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small text-uppercase">
+                                {{ field.label }}
+                            </label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="text-danger small">
+                                    {{ field.errors|striptags }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+
+                        <div class="d-grid mt-4">
+                            <button type="submit"
+                                class="btn btn-success btn-lg rounded-pill">
+                                <i class="fas fa-save me-2"></i> Update Exam
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $(document).ready(function () {
+
+        function loadCourses(batchId) {
+            if (!batchId) return;
+
+            $.ajax({
+                url: "{% url 'ajax_load_batch_course' %}",
+                data: {
+                    'batch_id': batchId
+                },
+                success: function (data) {
+                    $("#id_course").html(data);
+                }
+            });
+        }
+
+        // 🔹 Load courses on page load (EDIT FIX)
+        var initialBatch = $("#id_batch").val();
+        loadCourses(initialBatch);
+
+        // 🔹 Load courses when batch changes
+        $("#id_batch").change(function () {
+            loadCourses($(this).val());
+        });
+    });
+</script>
+{% endblock %}

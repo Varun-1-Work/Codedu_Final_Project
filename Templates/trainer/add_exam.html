@@ -1,0 +1,83 @@
+{% extends 'trainer/base.html' %}
+
+{% block title %}Add Exam | StudyLab{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold mb-0">Add Exam</h2>
+
+        <a href="{% url 'conduct_exam' %}"
+           class="btn btn-outline-secondary rounded-pill">
+            <i class="fas fa-arrow-left me-1"></i> Back
+        </a>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-6">
+
+            <div class="card shadow border-0 rounded-4">
+
+                <div class="card-header bg-primary text-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-pencil-alt me-2"></i>Add Exam
+                    </h5>
+                </div>
+
+                <div class="card-body p-4">
+                    <form method="post" id="examForm">
+                        {% csrf_token %}
+
+                        {% for field in form %}
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small text-uppercase">
+                                {{ field.label }}
+                            </label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="text-danger small">
+                                    {{ field.errors|striptags }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+
+                        <div class="d-grid mt-4">
+                            <button type="submit"
+                                class="btn btn-success btn-lg rounded-pill">
+                                <i class="fas fa-check me-2"></i> Save Exam
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $(document).ready(function () {
+        // Detect selection change in the Batch dropdown
+        $("#id_batch").change(function () {
+            var url = "{% url 'ajax_load_batch_course' %}"; 
+            var batchId = $(this).val();
+
+            $.ajax({
+                url: url,
+                data: {
+                    'batch_id': batchId
+                },
+                success: function (data) {
+                    // This replaces the empty options with the filtered course
+                    $("#id_course").html(data);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

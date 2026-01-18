@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Marks History</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+
+{% include 'trainer/navbar.html' %}
+
+<div class="container py-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0">
+            {{ exam.exam_name }} – Marks
+        </h4>
+
+        <div class="d-flex align-items-center gap-2">
+            <a href="{% url 'conduct_exam' %}" class="btn btn-outline-secondary">
+                ← Back
+            </a>
+
+            {% if marks.count < exam.batch.students.count %}
+                <a href="{% url 'upload_or_edit_marks' exam.id %}"
+                class="btn btn-success">
+                    Upload Marks
+                </a>
+            {% else %}
+                <span class="btn btn-success disabled">
+                    ✔ All Students Marked
+                </span>
+            {% endif %}
+        </div>
+    </div>
+
+
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Student</th>
+                <th>Batch</th>
+                <th>Marks</th>
+                <th>Result</th>
+                <th>Edit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mark in marks %}
+            <tr>
+                <td>{{ mark.student.user.get_full_name|default:mark.student.user.username|upper }}</td>
+
+                <td>{{ mark.student.batch.name }}</td>
+                <td>{{ mark.marks_obtained }} / {{ mark.total_marks }}</td>
+                <td>
+                    {% if mark.is_passed %}
+                        <span class="badge bg-success">Pass</span>
+                    {% else %}
+                        <span class="badge bg-danger">Fail</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{% url 'edit_exam_marks' mark.id %}"
+                       class="btn btn-sm btn-outline-primary">
+                        Edit
+                    </a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="text-center text-muted">
+                    No marks uploaded
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</div>
+</body>
+</html>
